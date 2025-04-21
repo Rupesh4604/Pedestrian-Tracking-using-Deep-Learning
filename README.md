@@ -1,3 +1,5 @@
+### Pedestrian Tracking using Deep Learning
+
 Step 1: Data Collection and Preprocessing
 
 The first step is to collect a dataset of publicly available CCTV footage that includes multiple camera views capturing people walking. This can be done by searching for CCTV footage on YouTube, academic datasets, and other free sources. Once the footage has been collected, it needs to be preprocessed into a format that is suitable for model training. This involves extracting frames from the video, resizing the frames, and normalizing the frames.
