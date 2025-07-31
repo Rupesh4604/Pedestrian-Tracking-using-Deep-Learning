@@ -1,75 +1,78 @@
 import cv2
 import torch
-import numpy as np
+import os
+import argparse
 from deep_sort_realtime.deepsort_tracker import DeepSort
 
-def preprocess_image(image):
-  """Pre-processes an image for YOLOv5.
+def track_people_in_directory(input_dir, output_dir, model_name='yolov5s', confidence_threshold=0.5):
+    """
+    Detects and tracks people in a directory of image frames.
 
-  Args:
-    image: A NumPy array representing the image.
+    Args:
+        input_dir (str): Path to the directory containing input frames.
+        output_dir (str): Path to the directory to save frames with tracking overlays.
+        model_name (str): Name of the YOLOv5 model to use.
+        confidence_threshold (float): Confidence threshold for person detection.
+    """
+    # Load the YOLOv5 model
+    model = torch.hub.load("ultralytics/yolov5", model_name, pretrained=True)
 
-  Returns:
-    A PyTorch tensor representing the pre-processed image.
-  """
+    # Initialize the DeepSort tracker
+    tracker = DeepSort(max_age=30)
 
-  # Resize the image to 640x640 pixels.
-  image = cv2.resize(image, (640, 640))
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-  # Convert the image to RGB format.
-  image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    frame_files = sorted([f for f in os.listdir(input_dir) if f.endswith('.jpg') or f.endswith('.png')])
 
-  # Normalize the image to a range of [0, 1].
-  image = image / 255.0
+    for frame_file in frame_files:
+        frame_path = os.path.join(input_dir, frame_file)
+        frame = cv2.imread(frame_path)
+        if frame is None:
+            continue
 
-  # Transpose the image to (channels, height, width) format.
-  image = image.transpose((2, 0, 1))
+        # Detect people in the frame
+        results = model(frame)
+        detections = results.pandas().xyxy[0]
+        person_detections = detections[detections['name'] == 'person']
 
-  # Convert the image to a PyTorch tensor.
-  image = torch.from_numpy(image)
+        # Format detections for DeepSort: [x1, y1, x2, y2], confidence, class
+        bbs = []
+        for index, row in person_detections.iterrows():
+            if row['confidence'] > confidence_threshold:
+                x1, y1, x2, y2 = int(row['xmin']), int(row['ymin']), int(row['xmax']), int(row['ymax'])
+                confidence = row['confidence']
+                # The deep_sort_realtime library expects a list of tuples,
+                # where each tuple is (bounding_box, score, class_name).
+                bbs.append(([x1, y1, x2 - x1, y2 - y1], confidence, 'person'))
 
-  return image
+        # Update the tracker with new detections
+        tracks = tracker.update_tracks(bbs, frame=frame)
 
-# Load the YOLOv5 model.
-model = torch.hub.load("ultralytics/yolov5", "yolov5s", pretrained=True)
+        # Draw bounding boxes and track IDs on the frame
+        for track in tracks:
+            if not track.is_confirmed():
+                continue
 
-# Create the tracker.
-tracker = DeepSort(max_age=5)
+            track_id = track.track_id
+            ltrb = track.to_ltrb()
+            x1, y1, x2, y2 = int(ltrb[0]), int(ltrb[1]), int(ltrb[2]), int(ltrb[3])
 
-# Load the input image.
-image = cv2.imread("C:\\Users\\rupes\\Downloads\\Computer_Vision\\Preprocessing\\frame_4.0.jpg")
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(frame, f"ID: {track_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-# Pre-process the input image.
-preprocessed_image = preprocess_image(image)
+        # Save the output frame
+        output_frame_path = os.path.join(output_dir, frame_file)
+        cv2.imwrite(output_frame_path, frame)
 
-# Detect people in the input image.
-results = model(preprocessed_image.unsqueeze(0)).cpu().detach().pandas().xyxy[0]
+    print(f"Processed {len(frame_files)} frames. Results saved in {output_dir}")
 
-# Filter the bounding boxes.
-bounding_boxes = []
-predicted_classes = []
-for row in results.itertuples():
-  if row.confidence > 0.5 and row.name == "person":
-    bounding_boxes.append([row.xmin, row.ymin, row.xmax, row.ymax])
-    predicted_classes.append(row.name)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Track people in a directory of frames.")
+    parser.add_argument("input_dir", type=str, help="Directory of input frames.")
+    parser.add_argument("output_dir", type=str, help="Directory to save tracked frames.")
+    parser.add_argument("--model", type=str, default="yolov5s", help="YOLOv5 model name.")
+    parser.add_argument("--conf", type=float, default=0.5, help="Confidence threshold for detection.")
+    args = parser.parse_args()
 
-# Update the tracker with the new detections.
-tracks = tracker.update_tracks(bounding_boxes, frame=image)
-
-# Draw bounding boxes around the tracked people.
-for track in tracks:
-  if not track.is_confirmed():
-    continue
-
-  track_id = track.track_id
-  ltrb = track.to_ltrb()
-
-  cv2.rectangle(image, (ltrb[0], ltvb[1]), (ltrb[2], ltvb[3]), (0, 255, 0), 2)
-  cv2.putText(image, str(track_id), (ltrb[0], ltvb[1] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-# Display the output image.
-cv2.imshow("Output", image)
-cv2.waitKey(0)
-
-# Release the video capture.
-cv2.destroyAllWindows()
+    track_people_in_directory(args.input_dir, args.output_dir, args.model, args.conf)

@@ -1,84 +1,132 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
+import argparse
 
-# Define the model architecture
+# --- Model Definition ---
+# NOTE: This model treats person re-identification as a classification problem,
+# where each person ID is a class. This is a valid approach for "closed-set"
+# re-id, where all test identities are known during training.
+# A more common and powerful approach is metric learning (e.g., with Triplet Loss),
+# which learns an embedding space where images of the same person are close and
+# images of different people are far apart. This allows for "open-set" re-id.
+
 class PersonReIDModel(nn.Module):
-    def __init__(self):
+    def __init__(self, num_classes):
         super(PersonReIDModel, self).__init__()
         self.network = nn.Sequential(
+            # Input: (3, 64, 64)
             nn.Conv2d(3, 32, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(2, 2),
+            nn.MaxPool2d(2, 2),  # -> (32, 32, 32)
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.MaxPool2d(2, 2),
+            nn.MaxPool2d(2, 2),  # -> (64, 16, 16)
             nn.Flatten(),
+            nn.Linear(64 * 16 * 16, 128),
+            nn.ReLU(),
+            nn.Linear(128, num_classes) # Output layer with `num_classes`
         )
-        # Adjust the input size to match the expected input size
-        self.fc = nn.Linear(64 * 16 * 16, 128)  # Adjust the input size based on feature map size
-        self.relu = nn.ReLU()
-        self.output = nn.Linear(128, 64)
 
     def forward(self, x):
-        features = self.network(x)
-        features = self.fc(features)
-        features = self.relu(features)
-        features = self.output(features)
-        return features
+        return self.network(x)
 
-# Define a function to load the training data
-def load_training_data(data_dir):
-    transform = transforms.Compose([transforms.Resize((64, 64)), transforms.ToTensor()])
-    train_dataset = datasets.ImageFolder(data_dir, transform=transform)
-    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
-    return train_loader
+# --- Data Loading ---
+def get_data_loaders(data_dir, batch_size, val_split=0.2):
+    """
+    Loads the dataset and splits it into training and validation loaders.
+    """
+    transform = transforms.Compose([
+        transforms.Resize((64, 64)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
 
-# Define a function to evaluate the model
-def evaluate_model(model, test_loader, criterion):
-    model.eval()
+    full_dataset = datasets.ImageFolder(data_dir, transform=transform)
+
+    # --- Data Splitting ---
+    # It's crucial to evaluate the model on a separate validation/test set
+    # that it hasn't seen during training.
+    num_train = int((1.0 - val_split) * len(full_dataset))
+    num_val = len(full_dataset) - num_train
+    train_dataset, val_dataset = random_split(full_dataset, [num_train, num_val])
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+
+    num_classes = len(full_dataset.classes)
+    print(f"Dataset has {num_classes} classes (person identities).")
+
+    return train_loader, val_loader, num_classes
+
+# --- Evaluation Function ---
+def evaluate_model(model, data_loader, criterion, device):
+    model.eval() # Set model to evaluation mode
+    total_loss = 0.0
     correct = 0
     total = 0
     with torch.no_grad():
-        for images, labels in test_loader:
+        for images, labels in data_loader:
+            images, labels = images.to(device), labels.to(device)
             outputs = model(images)
-            _, predicted = torch.max(outputs, 1)
+            loss = criterion(outputs, labels)
+            total_loss += loss.item()
+
+            _, predicted = torch.max(outputs.data, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
+
     accuracy = 100 * correct / total
-    return accuracy
+    avg_loss = total_loss / len(data_loader)
+    return avg_loss, accuracy
 
-# Define the path to the "prid_450s" dataset directory
-data_dir = "C:\\Users\\rupes\\Downloads\\prid_450s"
+# --- Main Training and Evaluation Logic ---
+def main(args):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
 
-# Create the model
-model = PersonReIDModel()
+    # Load data
+    train_loader, val_loader, num_classes = get_data_loaders(args.data_dir, args.batch_size)
 
-# Load training data
-train_loader = load_training_data(data_dir)
+    # Create the model
+    model = PersonReIDModel(num_classes).to(device)
 
-# Define the loss function (Cross-Entropy)
-criterion = nn.CrossEntropyLoss()
+    # Define loss function and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-# Define the optimizer (e.g., Adam)
-optimizer = optim.Adam(model.parameters())
+    # --- Training Loop ---
+    print("Starting training...")
+    for epoch in range(args.epochs):
+        model.train() # Set model to training mode
+        for images, labels in train_loader:
+            images, labels = images.to(device), labels.to(device)
 
-# Training loop
-num_epochs = 100
-for epoch in range(num_epochs):
-    for images, labels in train_loader:
-        optimizer.zero_grad()
-        features = model(images)
-        loss = criterion(features, labels)
-        loss.backward()
-        optimizer.step()
+            optimizer.zero_grad()
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
 
-# Evaluate the model
-# You can create a separate test loader using the same data directory.
-test_loader = load_training_data(data_dir)
-accuracy = evaluate_model(model, test_loader, criterion)
+        # --- Validation ---
+        val_loss, val_accuracy = evaluate_model(model, val_loader, criterion, device)
+        print(f"Epoch [{epoch+1}/{args.epochs}], Validation Loss: {val_loss:.4f}, Validation Accuracy: {val_accuracy:.2f}%")
 
-print("Accuracy:", accuracy)
+    print("Training finished.")
+
+    # Final evaluation on the validation set
+    final_loss, final_accuracy = evaluate_model(model, val_loader, criterion, device)
+    print(f"Final Validation Accuracy: {final_accuracy:.2f}%")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train a Person Re-identification Model.")
+    parser.add_argument("data_dir", type=str, help="Path to the dataset directory (e.g., prid_450s).")
+    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs.")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size for training.")
+    parser.add_argument("--lr", type=float, default=0.001, help="Learning rate for the optimizer.")
+
+    args = parser.parse_args()
+    main(args)
