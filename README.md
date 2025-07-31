@@ -1,19 +1,105 @@
-### Pedestrian Tracking using Deep Learning
+# Pedestrian Tracking and Re-identification Pipeline
 
-Step 1: Data Collection and Preprocessing
+## 1. Project Overview
 
-The first step is to collect a dataset of publicly available CCTV footage that includes multiple camera views capturing people walking. This can be done by searching for CCTV footage on YouTube, academic datasets, and other free sources. Once the footage has been collected, it needs to be preprocessed into a format that is suitable for model training. This involves extracting frames from the video, resizing the frames, and normalizing the frames.
+This project provides a comprehensive pipeline for pedestrian tracking in video footage. It takes a video file as input, performs person detection using YOLOv5, and tracks individuals across frames using DeepSort. The system is designed to be modular and extensible, with components for preprocessing, tracking, feature extraction, and person re-identification model training.
 
-Step 2: Person Detection
+This codebase has been significantly refactored from its original state to improve modularity, portability, and correctness.
 
-To implement person detection, we can use a pre-trained object detection model. A popular object detection model is YOLOv5. YOLOv5 is a fast and accurate object detection model that can be used to detect people in real time.
+## 2. Key Features
 
-To use YOLOv5, we first need to load the pre-trained model. Once the model is loaded, we can pass the image to the model to detect people. The model will return a list of bounding boxes and predicted classes for each bounding box.
+- **End-to-End Tracking Pipeline**: A single script (`main.py`) orchestrates the entire process from video to tracked frames.
+- **Modular Design**: The project is broken down into logical modules for easy maintenance and extension.
+- **Configurable Execution**: All scripts use command-line arguments, removing the need for hardcoded paths.
+- **State-of-the-Art Models**: Utilizes YOLOv5 for person detection and DeepSort for tracking.
+- **Feature Extraction**: Includes a module for extracting deep learning features from detected persons using a ResNet-50 model.
+- **Person Re-ID Training**: Provides a script to train a person re-identification model (as a classification task).
 
-Step 3: Person Tracking
+## 3. Project Structure
 
-To track people across frames and camera views, we can use a tracking algorithm such as Deep SORT. Deep SORT is a tracking algorithm that uses a neural network to associate people across frames.
+```
+.
+├── Feature_Extraction/
+│   └── feature_extractor.py   # Extracts deep learning features from images.
+├── Person_reentry/
+│   └── reentry.py             # Trains a person re-identification model.
+├── Preprocessing/
+│   └── Preprocessing.py       # Extracts and resizes frames from video.
+├── Tracking/
+│   └── tracking.py            # Performs person detection and tracking on frames.
+├── output/
+│   └──                        # Default directory for pipeline results.
+├── main.py                    # Main script to run the entire pipeline.
+├── requirements.txt           # Python dependencies.
+└── yolov5s.pt                 # Pre-trained YOLOv5 model weights.
+```
 
-To use Deep SORT, we first need to initialize the tracker. Once the tracker is initialized, we can pass the bounding boxes and predicted classes to the tracker. The tracker will update its state for each individual in the frame.
+## 4. Setup and Installation
 
-To get the tracking results, we can call the get_results() method on the tracker. This will return a list of bounding boxes and track IDs for each individual in the frame.
+Follow these steps to set up the project environment.
+
+**1. Clone the repository:**
+```bash
+git clone <repository-url>
+cd <repository-directory>
+```
+
+**2. Create a Python virtual environment (recommended):**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+**3. Install dependencies:**
+Install all the required Python packages using the `requirements.txt` file.
+```bash
+pip install -r requirements.txt
+```
+
+## 5. How to Run
+
+### Running the Full Pipeline
+
+The easiest way to use the project is to run the main pipeline script, which handles everything from frame extraction to tracking.
+
+```bash
+python3 main.py /path/to/your/video.mp4
+```
+
+This will create a new directory inside `output/` containing the extracted frames and the final frames with tracking overlays.
+
+You can customize the run using optional arguments:
+```bash
+python3 main.py /path/to/your/video.mp4 --output_dir /path/to/custom_output --model yolov5m --conf 0.6
+```
+Use `python3 main.py --help` to see all available options.
+
+### Running Individual Modules
+
+You can also run each module independently, which is useful for debugging or specific tasks.
+
+**1. Preprocessing:**
+Extract frames from a video into a directory.
+```bash
+python3 Preprocessing/Preprocessing.py /path/to/video.mp4 /path/to/output_frames_dir
+```
+
+**2. Tracking:**
+Run tracking on a directory of frames.
+```bash
+python3 Tracking/tracking.py /path/to/input_frames_dir /path/to/output_tracked_frames_dir
+```
+
+**3. Training the Re-ID Model:**
+Train the person re-identification model using a dataset like `prid_450s`. The dataset should be organized with one subdirectory per person.
+```bash
+python3 Person_reentry/reentry.py /path/to/dataset_directory
+```
+
+## 6. Module Descriptions
+
+- **`main.py`**: The central script that orchestrates the preprocessing and tracking pipeline.
+- **`Preprocessing/Preprocessing.py`**: Contains functions to extract frames from a video file and resize them.
+- **`Tracking/tracking.py`**: Uses YOLOv5 to detect people in frames and DeepSort to track them across the sequence of frames.
+- **`Feature_Extraction/feature_extractor.py`**: Provides a `CNNFeatureExtractor` class that uses a pre-trained ResNet-50 to extract deep learning features from an image of a person. This is intended to be used for re-identification tasks.
+- **`Person_reentry/reentry.py`**: A script for training a simple classification-based person re-identification model. It includes comments on its limitations and suggestions for more advanced metric learning approaches.
