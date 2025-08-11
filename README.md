@@ -40,8 +40,8 @@ Follow these steps to set up the project environment.
 
 **1. Clone the repository:**
 ```bash
-git clone <repository-url>
-cd <repository-directory>
+git clone (https://github.com/Rupesh4604/Pedestrian-Tracking-using-Deep-Learning)
+cd Pedestrian-Tracking-using-Deep-Learning
 ```
 
 **2. Create a Python virtual environment (recommended):**
